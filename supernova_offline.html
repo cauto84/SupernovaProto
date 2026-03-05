@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Supernova Merge - Offline Edition</title>
+    <style>
+        :root {
+            --bg: #0f0f0f;
+            --panel: #1a1a1a;
+            --accent: #FF595E;
+            --text: #ffffff;
+        }
+        * { box-sizing: border-box; touch-action: none; }
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg);
+            color: var(--text);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        #game-container {
+            position: relative;
+            width: 400px;
+            height: 600px;
+            background: var(--panel);
+            border: 4px solid #333;
+            border-radius: 20px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+            overflow: hidden;
+        }
+        canvas { display: block; cursor: crosshair; }
+        .hud {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: rgba(0,0,0,0.5);
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 900;
+            font-size: 20px;
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255,255,255,0.1);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .timer {
+            position: absolute;
+            top: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #ff4444;
+            color: white;
+            padding: 10px 30px;
+            border-radius: 15px;
+            font-weight: 900;
+            font-size: 32px;
+            box-shadow: 0 0 30px rgba(255,0,0,0.5);
+            border: 2px solid white;
+            display: none;
+            z-index: 10;
+        }
+        .overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(0,0,0,0.85);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 20px;
+            z-index: 20;
+        }
+        .overlay h2 { font-size: 48px; margin: 0; color: var(--accent); text-transform: uppercase; font-weight: 900; }
+        .score-box { background: rgba(255,255,255,0.05); padding: 20px; border-radius: 15px; margin: 20px 0; width: 100%; }
+        .btn {
+            background: white;
+            color: black;
+            border: none;
+            padding: 15px 40px;
+            border-radius: 30px;
+            font-weight: 900;
+            font-size: 18px;
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+        .btn:active { transform: scale(0.95); }
+        .footer { margin-top: 20px; text-align: center; max-width: 350px; opacity: 0.6; font-size: 13px; }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <canvas id="canvas" width="400" height="600"></canvas>
+        
+        <div class="hud">
+            <span>🏆</span>
+            <span id="score-val">0</span>
+        </div>
+
+        <div id="timer" class="timer">5.0s</div>
+
+        <div id="game-over" class="overlay">
+            <h2>Game Over</h2>
+            <p>You reached the limit!</p>
+            <div class="score-box">
+                <div style="font-size: 12px; text-transform: uppercase; opacity: 0.5;">Final Score</div>
+                <div id="final-score" style="font-size: 42px; font-weight: 900;">0</div>
+            </div>
+            <button class="btn" onclick="location.reload()">Restart Game</button>
+        </div>
+    </div>
+
+    <div class="footer">
+        <h3 style="margin: 0; font-weight: 900; text-transform: uppercase;">Supernova Merge</h3>
+        <p>Drag same-colored balls to merge. Reach Tier 3 for a Supernova! Don't let the stack stay above the line.</p>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('score-val');
+        const timerEl = document.getElementById('timer');
+        const gameOverEl = document.getElementById('game-over');
+        const finalScoreEl = document.getElementById('final-score');
+
+        // Config
+        const WIDTH = 400;
+        const HEIGHT = 600;
+        const LIMIT_LINE_Y = 120;
+        const GRAVITY = 0.4;
+        const FRICTION = 0.98;
+        const WALL_BOUNCE = 0.5;
+        const MERGE_TIME = 1500;
+        const GAME_OVER_TIME = 5000;
+        const CONNECTION_RADIUS = 150;
+
+        const COLORS = ['#FF595E', '#1982C4', '#8AC926', '#FFCA3A'];
+        const TIER_CONFIG = [
+            { radius: 20, points: 10 },
+            { radius: 35, points: 50 },
+            { radius: 50, points: 500 }
+        ];
+
+        let balls = [];
+        let score = 0;
+        let isGameOver = false;
+        let selectedBall = null;
+        let targetBall = null;
+        let mergeStartTime = null;
+        let dangerStartTime = null;
+        let lastTime = 0;
+        let dropTimer = 0;
+
+        class Ball {
+            constructor(x, y, tier, color) {
+                this.x = x;
+                this.y = y;
+                this.vx = 0;
+                this.vy = 0;
+                this.tier = tier;
+                this.color = color || COLORS[Math.floor(Math.random() * COLORS.length)];
+                this.radius = TIER_CONFIG[tier - 1].radius;
+                this.mass = this.radius;
+                this.isStatic = false;
+            }
+
+            update() {
+                if (this.isStatic) return;
+
+                this.vy += GRAVITY;
+                this.vx *= FRICTION;
+                this.vy *= FRICTION;
+                
+                this.x += this.vx;
+                this.y += this.vy;
+
+                // Wall collisions
+                if (this.x < this.radius) { this.x = this.radius; this.vx *= -WALL_BOUNCE; }
+                if (this.x > WIDTH - this.radius) { this.x = WIDTH - this.radius; this.vx *= -WALL_BOUNCE; }
+                if (this.y > HEIGHT - this.radius) { this.y = HEIGHT - this.radius; this.vy *= -WALL_BOUNCE; this.vx *= 0.95; }
+            }
+
+            draw(ctx) {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                
+                // Shine effect
+                ctx.beginPath();
+                ctx.arc(this.x - this.radius * 0.3, this.y - this.radius * 0.3, this.radius * 0.2, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(255,255,255,0.3)';
+                ctx.fill();
+            }
+        }
+
+        function spawnBall() {
+            const x = Math.random() * (WIDTH - 40) + 20;
+            balls.push(new Ball(x, -50, 1));
+        }
+
+        // Physics: Circle-Circle Collision
+        function resolveCollisions() {
+            for (let i = 0; i < balls.length; i++) {
+                for (let j = i + 1; j < balls.length; j++) {
+                    const b1 = balls[i];
+                    const b2 = balls[j];
+                    
+                    const dx = b2.x - b1.x;
+                    const dy = b2.y - b1.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    const minDist = b1.radius + b2.radius;
+
+                    if (dist < minDist) {
+                        // Collision resolution
+                        const normalX = dx / dist;
+                        const normalY = dy / dist;
+                        
+                        // Separate
+                        const overlap = minDist - dist;
+                        const sepX = normalX * overlap * 0.5;
+                        const sepY = normalY * overlap * 0.5;
+
+                        if (!b1.isStatic) { b1.x -= sepX; b1.y -= sepY; }
+                        if (!b2.isStatic) { b2.x += sepX; b2.y += sepY; }
+
+                        // Impulse
+                        const relVx = b2.vx - b1.vx;
+                        const relVy = b2.vy - b1.vy;
+                        const velAlongNormal = relVx * normalX + relVy * normalY;
+
+                        if (velAlongNormal > 0) continue;
+
+                        const e = 0.3; // Restitution
+                        let jImpulse = -(1 + e) * velAlongNormal;
+                        jImpulse /= (1 / b1.mass + 1 / b2.mass);
+
+                        const impulseX = jImpulse * normalX;
+                        const impulseY = jImpulse * normalY;
+
+                        if (!b1.isStatic) { b1.vx -= impulseX / b1.mass; b1.vy -= impulseY / b1.mass; }
+                        if (!b2.isStatic) { b2.vx += impulseX / b2.mass; b2.vy += impulseY / b2.mass; }
+                    }
+                }
+            }
+        }
+
+        function triggerSupernova(x, y) {
+            balls.forEach(b => {
+                const dx = b.x - x;
+                const dy = b.y - y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < 200 && dist > 0) {
+                    const force = (1 - dist / 200) * 15;
+                    b.vx += (dx / dist) * force;
+                    b.vy += (dy / dist) * force;
+                }
+            });
+        }
+
+        // Input Handling
+        function getMousePos(e) {
+            const rect = canvas.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            return {
+                x: (clientX - rect.left) * (WIDTH / rect.width),
+                y: (clientY - rect.top) * (HEIGHT / rect.height)
+            };
+        }
+
+        canvas.addEventListener('mousedown', startDrag);
+        canvas.addEventListener('touchstart', startDrag);
+        window.addEventListener('mousemove', drag);
+        window.addEventListener('touchmove', drag);
+        window.addEventListener('mouseup', endDrag);
+        window.addEventListener('touchend', endDrag);
+
+        function startDrag(e) {
+            if (isGameOver) return;
+            const pos = getMousePos(e);
+            for (let b of balls) {
+                const dist = Math.sqrt((b.x - pos.x)**2 + (b.y - pos.y)**2);
+                if (dist < b.radius) {
+                    selectedBall = b;
+                    b.isStatic = true;
+                    break;
+                }
+            }
+        }
+
+        function drag(e) {
+            if (!selectedBall) return;
+            const pos = getMousePos(e);
+            selectedBall.x = pos.x;
+            selectedBall.y = pos.y;
+            selectedBall.vx = 0;
+            selectedBall.vy = 0;
+
+            // Find target
+            let best = null;
+            let minDist = Infinity;
+            balls.forEach(b => {
+                if (b === selectedBall) return;
+                if (b.tier === selectedBall.tier && b.color === selectedBall.color) {
+                    const d = Math.sqrt((b.x - selectedBall.x)**2 + (b.y - selectedBall.y)**2);
+                    if (d < CONNECTION_RADIUS) {
+                        const dMouse = Math.sqrt((b.x - pos.x)**2 + (b.y - pos.y)**2);
+                        if (dMouse < minDist) {
+                            minDist = dMouse;
+                            best = b;
+                        }
+                    }
+                }
+            });
+
+            if (best !== targetBall) {
+                targetBall = best;
+                mergeStartTime = best ? Date.now() : null;
+            }
+        }
+
+        function endDrag() {
+            if (!selectedBall) return;
+            
+            if (targetBall && mergeStartTime && (Date.now() - mergeStartTime >= MERGE_TIME)) {
+                performMerge(selectedBall, targetBall);
+            } else {
+                selectedBall.isStatic = false;
+            }
+
+            selectedBall = null;
+            targetBall = null;
+            mergeStartTime = null;
+        }
+
+        function performMerge(b1, b2) {
+            const tier = b1.tier;
+            const color = b1.color;
+            const x = b2.x;
+            const y = b2.y;
+
+            balls = balls.filter(b => b !== b1 && b !== b2);
+            score += TIER_CONFIG[tier - 1].points;
+            scoreEl.innerText = score;
+
+            if (tier < 3) {
+                balls.push(new Ball(x, y, tier + 1, color));
+            } else {
+                score += 500;
+                scoreEl.innerText = score;
+                triggerSupernova(x, y);
+            }
+        }
+
+        function gameLoop(time) {
+            const dt = time - lastTime;
+            lastTime = time;
+
+            if (!isGameOver) {
+                update(dt);
+            }
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function update(dt) {
+            // Drop balls
+            dropTimer += dt;
+            const interval = Math.max(500, 3000 - Math.floor(score / 100) * 100);
+            if (dropTimer > interval) {
+                spawnBall();
+                dropTimer = 0;
+            }
+
+            // Physics
+            balls.forEach(b => b.update());
+            for (let i = 0; i < 5; i++) resolveCollisions(); // Sub-stepping for stability
+
+            // Auto-merge check
+            if (selectedBall && targetBall && mergeStartTime) {
+                if (Date.now() - mergeStartTime >= MERGE_TIME) {
+                    endDrag();
+                }
+            }
+
+            // Game Over Check
+            const isAnyAbove = balls.some(b => {
+                if (b === selectedBall) return false;
+                if (b.y < 0) return false;
+                const top = b.y - b.radius;
+                const speed = Math.sqrt(b.vx**2 + b.vy**2);
+                return top < LIMIT_LINE_Y && speed < 0.5;
+            });
+
+            if (isAnyAbove) {
+                if (!dangerStartTime) dangerStartTime = Date.now();
+                const elapsed = Date.now() - dangerStartTime;
+                const remaining = Math.max(0, GAME_OVER_TIME - elapsed);
+                
+                timerEl.style.display = 'block';
+                timerEl.innerText = (remaining / 1000).toFixed(1) + 's';
+                
+                if (remaining <= 0) {
+                    isGameOver = true;
+                    gameOverEl.style.display = 'flex';
+                    finalScoreEl.innerText = score;
+                }
+            } else {
+                dangerStartTime = null;
+                timerEl.style.display = 'none';
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, WIDTH, HEIGHT);
+
+            // Limit Line
+            ctx.beginPath();
+            ctx.setLineDash([5, 5]);
+            ctx.moveTo(0, LIMIT_LINE_Y);
+            ctx.lineTo(WIDTH, LIMIT_LINE_Y);
+            if (dangerStartTime) {
+                const pulse = Math.sin(Date.now() / 100) * 0.5 + 0.5;
+                ctx.strokeStyle = `rgba(255, 0, 0, ${0.3 + pulse * 0.7})`;
+                ctx.lineWidth = 2 + pulse * 2;
+            } else {
+                ctx.strokeStyle = 'rgba(255, 0, 0, 0.3)';
+                ctx.lineWidth = 1;
+            }
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Connection UI
+            if (selectedBall) {
+                // Radius
+                ctx.beginPath();
+                ctx.arc(selectedBall.x, selectedBall.y, CONNECTION_RADIUS, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(255,255,255,0.05)';
+                ctx.fill();
+                ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+                ctx.stroke();
+
+                if (targetBall) {
+                    // Line
+                    ctx.beginPath();
+                    ctx.setLineDash([5, 5]);
+                    ctx.moveTo(selectedBall.x, selectedBall.y);
+                    ctx.lineTo(targetBall.x, targetBall.y);
+                    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+
+                    // Target Highlight
+                    ctx.beginPath();
+                    const pulse = Math.sin(Date.now() / 150) * 5 + 5;
+                    ctx.arc(targetBall.x, targetBall.y, targetBall.radius + pulse, 0, Math.PI * 2);
+                    ctx.strokeStyle = targetBall.color;
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+
+                    // Merge Timer
+                    if (mergeStartTime) {
+                        const progress = (Date.now() - mergeStartTime) / MERGE_TIME;
+                        ctx.beginPath();
+                        ctx.arc(selectedBall.x, selectedBall.y, selectedBall.radius + 8, -Math.PI/2, -Math.PI/2 + (Math.PI*2*progress));
+                        ctx.strokeStyle = selectedBall.color;
+                        ctx.lineWidth = 4;
+                        ctx.stroke();
+                    }
+                }
+            }
+
+            // Balls
+            balls.forEach(b => b.draw(ctx));
+        }
+
+        // Start
+        for (let i = 0; i < 20; i++) {
+            balls.push(new Ball(Math.random() * 360 + 20, Math.random() * 300 + 200, 1));
+        }
+        requestAnimationFrame(gameLoop);
+
+    </script>
+</body>
+</html>

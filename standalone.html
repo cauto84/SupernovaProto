@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Supernova Merge - Standalone</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #0f0f0f;
+            color: white;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <!-- Dependencies -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/matter-js@0.19.0/build/matter.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js"></script>
+
+    <script type="text/babel">
+        const { useEffect, useRef, useState } = React;
+        const { motion, AnimatePresence } = Motion;
+
+        const COLORS = {
+            RED: '#FF595E',
+            BLUE: '#1982C4',
+            GREEN: '#8AC926',
+            YELLOW: '#FFCA3A',
+        };
+
+        const TIER_CONFIG = [
+            { tier: 1, radius: 20, points: 10, label: 'Small' },
+            { tier: 2, radius: 35, points: 50, label: 'Medium' },
+            { tier: 3, radius: 50, points: 500, label: 'Large' },
+        ];
+
+        const CONNECTION_RADIUS = 150;
+        const LIMIT_LINE_Y = 120;
+        const GAME_OVER_TIME = 5000;
+        const MERGE_COUNTDOWN_DURATION = 1500;
+
+        // Custom Lucide Components for Standalone
+        const Trophy = () => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-yellow-400">
+                <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>
+            </svg>
+        );
+
+        const RefreshCcw = () => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/>
+            </svg>
+        );
+
+        function App() {
+            const sceneRef = useRef(null);
+            const engineRef = useRef(null);
+            const renderRef = useRef(null);
+            const [score, setScore] = useState(0);
+            const scoreRef = useRef(0);
+            const [gameOver, setGameOver] = useState(false);
+            const gameOverRef = useRef(false);
+            const [gameOverCountdown, setGameOverCountdown] = useState(null);
+            const [selectedBall, setSelectedBall] = useState(null);
+            const [targetBall, setTargetBall] = useState(null);
+            const selectedBallRef = useRef(null);
+            const targetBallRef = useRef(null);
+            const mergeTimerStartRef = useRef(null);
+            const gameOverTimerRef = useRef(null);
+
+            useEffect(() => {
+                if (!sceneRef.current) return;
+
+                const engine = Matter.Engine.create();
+                engineRef.current = engine;
+                engine.gravity.y = 1;
+
+                const render = Matter.Render.create({
+                    element: sceneRef.current,
+                    engine: engine,
+                    options: {
+                        width: 400,
+                        height: 600,
+                        wireframes: false,
+                        background: '#1a1a1a',
+                    },
+                });
+                renderRef.current = render;
+
+                const ground = Matter.Bodies.rectangle(200, 610, 400, 20, { isStatic: true, render: { fillStyle: '#333' } });
+                const leftWall = Matter.Bodies.rectangle(-10, 300, 20, 600, { isStatic: true, render: { fillStyle: '#333' } });
+                const rightWall = Matter.Bodies.rectangle(410, 300, 20, 600, { isStatic: true, render: { fillStyle: '#333' } });
+
+                Matter.World.add(engine.world, [ground, leftWall, rightWall]);
+
+                // Initial balls
+                const initialBalls = [];
+                for (let i = 0; i < 25; i++) {
+                    initialBalls.push(createBall(Math.random() * 360 + 20, Math.random() * 300 + 100, 1));
+                }
+                Matter.World.add(engine.world, initialBalls);
+
+                const runner = Matter.Runner.create();
+                Matter.Runner.run(runner, engine);
+                Matter.Render.run(render);
+
+                // Dynamic ball drop logic
+                const getDropInterval = (currentScore) => {
+                    const baseInterval = 3000;
+                    const reduction = Math.floor(currentScore / 100) * 100;
+                    return Math.max(500, baseInterval - reduction);
+                };
+
+                let dropTimeout;
+                const scheduleNextDrop = () => {
+                    const interval = getDropInterval(scoreRef.current);
+                    dropTimeout = window.setTimeout(() => {
+                        if (!gameOverRef.current) {
+                            const newBall = createBall(Math.random() * 360 + 20, -20, 1);
+                            Matter.World.add(engine.world, newBall);
+                            scheduleNextDrop();
+                        }
+                    }, interval);
+                };
+
+                scheduleNextDrop();
+
+                // Custom rendering
+                Matter.Events.on(render, 'afterRender', () => {
+                    const context = render.context;
+                    
+                    // Draw limit line
+                    context.beginPath();
+                    context.setLineDash([5, 5]);
+                    context.moveTo(0, LIMIT_LINE_Y);
+                    context.lineTo(400, LIMIT_LINE_Y);
+                    
+                    if (gameOverTimerRef.current) {
+                        const pulse = Math.sin(Date.now() / 100) * 0.5 + 0.5;
+                        context.strokeStyle = `rgba(255, 0, 0, ${0.3 + pulse * 0.7})`;
+                        context.lineWidth = 2 + pulse * 2;
+                    } else {
+                        context.strokeStyle = 'rgba(255, 0, 0, 0.5)';
+                        context.lineWidth = 1;
+                    }
+                    
+                    context.stroke();
+                    context.setLineDash([]);
+
+                    const currentSelected = selectedBallRef.current;
+                    const currentTarget = targetBallRef.current;
+
+                    if (currentSelected) {
+                        context.beginPath();
+                        context.arc(currentSelected.position.x, currentSelected.position.y, CONNECTION_RADIUS, 0, Math.PI * 2);
+                        context.fillStyle = 'rgba(255, 255, 255, 0.08)';
+                        context.fill();
+                        context.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+                        context.lineWidth = 1;
+                        context.stroke();
+
+                        if (currentTarget) {
+                            context.beginPath();
+                            context.setLineDash([5, 5]);
+                            context.moveTo(currentSelected.position.x, currentSelected.position.y);
+                            context.lineTo(currentTarget.position.x, currentTarget.position.y);
+                            context.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+                            context.lineWidth = 2;
+                            context.stroke();
+                            context.setLineDash([]);
+
+                            context.beginPath();
+                            const pulse = Math.sin(Date.now() / 150) * 8 + 8;
+                            context.arc(currentTarget.position.x, currentTarget.position.y, currentTarget.customRadius + pulse, 0, Math.PI * 2);
+                            context.strokeStyle = currentTarget.customColor;
+                            context.lineWidth = 4;
+                            context.stroke();
+
+                            context.beginPath();
+                            context.arc(currentTarget.position.x, currentTarget.position.y, currentTarget.customRadius + 2, 0, Math.PI * 2);
+                            context.fillStyle = 'rgba(255, 255, 255, 0.2)';
+                            context.fill();
+
+                            if (mergeTimerStartRef.current) {
+                                const elapsed = Date.now() - mergeTimerStartRef.current;
+                                const remaining = Math.max(0, MERGE_COUNTDOWN_DURATION - elapsed);
+                                const progress = elapsed / MERGE_COUNTDOWN_DURATION;
+
+                                context.beginPath();
+                                context.arc(currentSelected.position.x, currentSelected.position.y, currentSelected.customRadius + 10, -Math.PI / 2, (-Math.PI / 2) + (Math.PI * 2 * progress));
+                                context.strokeStyle = currentSelected.customColor;
+                                context.lineWidth = 4;
+                                context.stroke();
+
+                                context.font = 'bold 14px Inter';
+                                context.fillStyle = '#fff';
+                                context.textAlign = 'center';
+                                context.fillText(`${(remaining / 1000).toFixed(1)}s`, currentSelected.position.x, currentSelected.position.y - currentSelected.customRadius - 20);
+                            }
+                        }
+                    }
+                });
+
+                const handleGameOverCheck = () => {
+                    if (gameOverRef.current) return;
+                    const bodies = Matter.Composite.allBodies(engine.world);
+                    const isAnyAbove = bodies.some(b => {
+                        if (!b.customRadius) return false;
+                        if (selectedBallRef.current === b) return false;
+                        if (b.position.y < 0) return false;
+                        const ballTop = b.position.y - b.customRadius;
+                        if (ballTop >= LIMIT_LINE_Y) return false;
+                        const velocityMag = Matter.Vector.magnitude(b.velocity);
+                        return velocityMag < 0.5;
+                    });
+
+                    if (isAnyAbove) {
+                        if (!gameOverTimerRef.current) {
+                            const startTime = Date.now();
+                            gameOverTimerRef.current = window.setTimeout(() => {
+                                setGameOver(true);
+                                gameOverRef.current = true;
+                                setGameOverCountdown(null);
+                            }, GAME_OVER_TIME);
+
+                            const updateCountdown = () => {
+                                if (gameOverTimerRef.current && !gameOverRef.current) {
+                                    const elapsed = Date.now() - startTime;
+                                    const remaining = Math.max(0, GAME_OVER_TIME - elapsed);
+                                    setGameOverCountdown(remaining);
+                                    requestAnimationFrame(updateCountdown);
+                                }
+                            };
+                            updateCountdown();
+                        }
+                    } else {
+                        if (gameOverTimerRef.current) {
+                            clearTimeout(gameOverTimerRef.current);
+                            gameOverTimerRef.current = null;
+                            setGameOverCountdown(null);
+                        }
+                    }
+                };
+
+                Matter.Events.on(engine, 'afterUpdate', handleGameOverCheck);
+
+                return () => {
+                    clearTimeout(dropTimeout);
+                    Matter.Events.off(engine, 'afterUpdate', handleGameOverCheck);
+                    Matter.Render.stop(render);
+                    Matter.Engine.clear(engine);
+                    if (render.canvas) render.canvas.remove();
+                    if (gameOverTimerRef.current) clearTimeout(gameOverTimerRef.current);
+                };
+            }, []);
+
+            const createBall = (x, y, tier, color) => {
+                const config = TIER_CONFIG[tier - 1];
+                const ballColor = color || Object.values(COLORS)[Math.floor(Math.random() * 4)];
+                const ball = Matter.Bodies.circle(x, y, config.radius, {
+                    restitution: 0.4,
+                    friction: 0.1,
+                    render: { fillStyle: ballColor },
+                });
+                ball.tier = tier;
+                ball.customColor = ballColor;
+                ball.customRadius = config.radius;
+                return ball;
+            };
+
+            const handleMouseDown = (e) => {
+                if (gameOver || !engineRef.current) return;
+                const rect = sceneRef.current?.getBoundingClientRect();
+                if (!rect) return;
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                const bodies = Matter.Composite.allBodies(engineRef.current.world);
+                const clicked = Matter.Query.point(bodies, { x, y })[0];
+                if (clicked && !clicked.isStatic) {
+                    setSelectedBall(clicked);
+                    selectedBallRef.current = clicked;
+                    Matter.Body.setStatic(clicked, true);
+                }
+            };
+
+            const handleMouseMove = (e) => {
+                const currentSelected = selectedBallRef.current;
+                if (!currentSelected || !engineRef.current) return;
+                const rect = sceneRef.current?.getBoundingClientRect();
+                if (!rect) return;
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                const mousePos = { x: mouseX, y: mouseY };
+                const bodies = Matter.Composite.allBodies(engineRef.current.world);
+                let bestTarget = null;
+                let minMouseDist = Infinity;
+
+                bodies.forEach(body => {
+                    if (body === currentSelected || body.isStatic) return;
+                    if (body.tier === currentSelected.tier && body.customColor === currentSelected.customColor) {
+                        const distToSelected = Matter.Vector.magnitude(Matter.Vector.sub(body.position, currentSelected.position));
+                        if (distToSelected <= CONNECTION_RADIUS) {
+                            const distToMouse = Matter.Vector.magnitude(Matter.Vector.sub(body.position, mousePos));
+                            if (distToMouse < minMouseDist) {
+                                minMouseDist = distToMouse;
+                                bestTarget = body;
+                            }
+                        }
+                    }
+                });
+
+                if (bestTarget !== targetBallRef.current) {
+                    setTargetBall(bestTarget);
+                    targetBallRef.current = bestTarget;
+                    if (bestTarget) {
+                        if (!mergeTimerStartRef.current) {
+                            mergeTimerStartRef.current = Date.now();
+                            const checkAutoMerge = () => {
+                                if (targetBallRef.current && selectedBallRef.current === currentSelected) {
+                                    const elapsed = Date.now() - (mergeTimerStartRef.current || 0);
+                                    if (elapsed >= MERGE_COUNTDOWN_DURATION) {
+                                        handleMouseUp();
+                                    } else {
+                                        requestAnimationFrame(checkAutoMerge);
+                                    }
+                                }
+                            };
+                            requestAnimationFrame(checkAutoMerge);
+                        }
+                    } else {
+                        mergeTimerStartRef.current = null;
+                    }
+                }
+            };
+
+            const updateScore = (points) => {
+                setScore(prev => {
+                    const newScore = prev + points;
+                    scoreRef.current = newScore;
+                    return newScore;
+                });
+            };
+
+            const handleMouseUp = () => {
+                const currentSelected = selectedBallRef.current;
+                const currentTarget = targetBallRef.current;
+                mergeTimerStartRef.current = null;
+                if (!currentSelected || !engineRef.current) return;
+
+                if (currentTarget) {
+                    const tier = currentSelected.tier;
+                    const color = currentSelected.customColor;
+                    const targetPos = { x: currentTarget.position.x, y: currentTarget.position.y };
+                    const startPos = { x: currentSelected.position.x, y: currentSelected.position.y };
+                    let progress = 0;
+                    const duration = 10;
+                    const animateMerge = () => {
+                        if (!engineRef.current) return;
+                        progress++;
+                        const t = progress / duration;
+                        const currentX = startPos.x + (targetPos.x - startPos.x) * t;
+                        const currentY = startPos.y + (targetPos.y - startPos.y) * t;
+                        Matter.Body.setPosition(currentSelected, { x: currentX, y: currentY });
+                        if (progress < duration) {
+                            requestAnimationFrame(animateMerge);
+                        } else {
+                            if (engineRef.current) {
+                                Matter.World.remove(engineRef.current.world, [currentSelected, currentTarget]);
+                                if (tier < 3) {
+                                    const nextTierBall = createBall(targetPos.x, targetPos.y, tier + 1, color);
+                                    Matter.World.add(engineRef.current.world, nextTierBall);
+                                    updateScore(TIER_CONFIG[tier - 1].points);
+                                } else {
+                                    updateScore(500);
+                                    triggerSupernova(targetPos.x, targetPos.y);
+                                }
+                            }
+                        }
+                    };
+                    requestAnimationFrame(animateMerge);
+                } else {
+                    Matter.Body.setStatic(currentSelected, false);
+                }
+                setSelectedBall(null);
+                setTargetBall(null);
+                selectedBallRef.current = null;
+                targetBallRef.current = null;
+            };
+
+            const triggerSupernova = (x, y) => {
+                if (!engineRef.current) return;
+                const bodies = Matter.Composite.allBodies(engineRef.current.world);
+                bodies.forEach(body => {
+                    if (body.isStatic) return;
+                    const forceVector = Matter.Vector.sub(body.position, { x, y });
+                    const distance = Matter.Vector.magnitude(forceVector);
+                    if (distance < 200) {
+                        const forceMagnitude = (1 - distance / 200) * 0.15;
+                        Matter.Body.applyForce(body, body.position, Matter.Vector.mult(Matter.Vector.normalise(forceVector), forceMagnitude));
+                    }
+                });
+            };
+
+            const restartGame = () => {
+                window.location.reload();
+            };
+
+            return (
+                <div className="min-h-screen bg-[#0f0f0f] flex flex-col items-center justify-center font-sans text-white p-4">
+                    <div className="relative w-[400px] h-[600px] border-4 border-[#333] rounded-2xl overflow-hidden shadow-2xl">
+                        <div 
+                            ref={sceneRef} 
+                            onMouseDown={handleMouseDown}
+                            onMouseMove={handleMouseMove}
+                            onMouseUp={handleMouseUp}
+                            onMouseLeave={handleMouseUp}
+                            onTouchStart={(e) => {
+                                const touch = e.touches[0];
+                                handleMouseDown({ clientX: touch.clientX, clientY: touch.clientY });
+                            }}
+                            onTouchMove={(e) => {
+                                const touch = e.touches[0];
+                                handleMouseMove({ clientX: touch.clientX, clientY: touch.clientY });
+                            }}
+                            onTouchEnd={handleMouseUp}
+                            className="absolute inset-0 cursor-crosshair touch-none"
+                        />
+
+                        <div className="absolute top-4 right-4 z-10 flex items-center gap-2 bg-black/40 backdrop-blur-md px-4 py-2 rounded-full border border-white/10">
+                            <Trophy />
+                            <span className="text-xl font-bold tracking-tight">{score}</span>
+                        </div>
+
+                        <AnimatePresence>
+                            {gameOverCountdown !== null && !gameOver && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: -20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -20 }}
+                                    className="absolute top-24 left-1/2 -translate-x-1/2 z-20 bg-red-500 text-white px-8 py-3 rounded-2xl font-black text-3xl shadow-[0_0_30px_rgba(239,68,68,0.5)] border-2 border-white/30"
+                                >
+                                    {(gameOverCountdown / 1000).toFixed(1)}s
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+
+                        <AnimatePresence>
+                            {gameOver && (
+                                <motion.div 
+                                    initial={{ opacity: 0, scale: 0.9 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    exit={{ opacity: 0, scale: 0.9 }}
+                                    className="absolute inset-0 z-20 bg-black/80 flex flex-col items-center justify-center p-8 text-center"
+                                >
+                                    <h2 className="text-5xl font-black mb-2 text-red-500 uppercase tracking-tighter">Game Over</h2>
+                                    <p className="text-gray-400 mb-8">You reached the limit!</p>
+                                    
+                                    <div className="bg-white/5 p-6 rounded-2xl border border-white/10 mb-8 w-full">
+                                        <p className="text-sm uppercase tracking-widest text-gray-500 mb-1">Final Score</p>
+                                        <p className="text-4xl font-bold">{score}</p>
+                                    </div>
+
+                                    <button 
+                                        onClick={restartGame}
+                                        className="flex items-center gap-2 bg-white text-black px-8 py-4 rounded-full font-bold hover:bg-gray-200 transition-colors"
+                                    >
+                                        <RefreshCcw />
+                                        Restart Game
+                                    </button>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+
+                        {!gameOver && score === 0 && (
+                            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-center pointer-events-none opacity-50">
+                                <p className="text-xs uppercase tracking-widest">Drag same-colored balls to merge</p>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="mt-8 text-center max-w-md">
+                        <h1 className="text-3xl font-black mb-2 tracking-tighter uppercase">SUPERNOVA MERGE</h1>
+                        <p className="text-gray-500 text-sm">
+                            Merge balls of the same color and size. Reach Tier 3 to trigger a Supernova! 
+                            Don't let the balls stay above the red line.
+                        </p>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

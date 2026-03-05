@@ -1,0 +1,5 @@
+{
+  "name": "Supernova Merge",
+  "description": "A physics-based puzzle game where you merge colored balls to trigger supernovas.",
+  "requestFramePermissions": []
+}
