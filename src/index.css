@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+@theme {
+  --animate-spin-slow: spin 8s linear infinite;
+}
+
 @layer base {
   html, body {
     @apply select-none overflow-hidden touch-none;
