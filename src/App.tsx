@@ -195,6 +195,61 @@ function Game({ difficulty, onBack }: { difficulty: Difficulty; onBack: () => vo
   const targetBallRef = useRef<Matter.Body | null>(null);
   const mergeTimerStartRef = useRef<number | null>(null);
   const gameOverTimerRef = useRef<number | null>(null);
+  const particlesRef = useRef<any[]>([]);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
+  const playMergeSound = (tier: number) => {
+    try {
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') ctx.resume();
+      
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sine';
+      const freq = 200 + tier * 100;
+      osc.frequency.setValueAtTime(freq, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(freq * 0.5, ctx.currentTime + 0.15);
+
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start();
+      osc.stop(ctx.currentTime + 0.15);
+    } catch (e) {
+      console.error('Audio error:', e);
+    }
+  };
+
+  const triggerHaptic = (tier: number) => {
+    if ('vibrate' in navigator) {
+      const duration = 15 + tier * 20;
+      navigator.vibrate(duration);
+    }
+  };
+
+  const createParticles = (x: number, y: number, color: string, count = 15, speedMult = 1) => {
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = (Math.random() * 4 + 2) * speedMult;
+      particlesRef.current.push({
+        x,
+        y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 1.0,
+        decay: 0.02 + Math.random() * 0.02,
+        color,
+        size: Math.random() * 5 + 2
+      });
+    }
+  };
 
   // Leaderboard submission state
   const [playerName, setPlayerName] = useState('');
@@ -303,6 +358,22 @@ function Game({ difficulty, onBack }: { difficulty: Difficulty; onBack: () => vo
       
       context.stroke();
       context.setLineDash([]);
+
+      // Update and draw particles
+      particlesRef.current = particlesRef.current.filter(p => p.life > 0);
+      particlesRef.current.forEach(p => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.1; // gravity
+        p.life -= p.decay;
+        
+        context.globalAlpha = p.life;
+        context.beginPath();
+        context.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        context.fillStyle = p.color;
+        context.fill();
+      });
+      context.globalAlpha = 1.0;
 
       // Draw connection UI
       const currentSelected = selectedBallRef.current;
@@ -554,6 +625,10 @@ function Game({ difficulty, onBack }: { difficulty: Difficulty; onBack: () => vo
         } else {
           if (engineRef.current) {
             Matter.World.remove(engineRef.current.world, [currentSelected, currentTarget]);
+            playMergeSound(tier);
+            triggerHaptic(tier);
+            createParticles(targetPos.x, targetPos.y, color, 10);
+
             if (tier < 3) {
               const nextTierBall = createBall(targetPos.x, targetPos.y, tier + 1, color);
               Matter.World.add(engineRef.current.world, nextTierBall);
@@ -577,6 +652,12 @@ function Game({ difficulty, onBack }: { difficulty: Difficulty; onBack: () => vo
 
   const triggerSupernova = (x: number, y: number) => {
     if (!engineRef.current) return;
+    
+    // Big explosion effect
+    createParticles(x, y, '#fff', 40, 2);
+    createParticles(x, y, '#FFD700', 30, 1.5);
+    triggerHaptic(5); // Stronger haptic for supernova
+
     const bodies = Matter.Composite.allBodies(engineRef.current.world);
     bodies.forEach(body => {
       if ((body as any).isStatic) return;
