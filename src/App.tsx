@@ -438,13 +438,28 @@ function Game({ difficulty, onBack }: { difficulty: Difficulty; onBack: () => vo
     return ball;
   };
 
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (gameOver || !engineRef.current) return;
+  const getScaledCoordinates = (clientX: number, clientY: number) => {
     const rect = sceneRef.current?.getBoundingClientRect();
-    if (!rect) return;
+    if (!rect) return { x: 0, y: 0 };
     
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    // Calculate position relative to the element
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    
+    // Scale to Matter.js internal coordinates (400x600)
+    const scaleX = 400 / rect.width;
+    const scaleY = 600 / rect.height;
+    
+    return {
+      x: x * scaleX,
+      y: y * scaleY
+    };
+  };
+
+  const handleMouseDown = (e: React.MouseEvent | { clientX: number, clientY: number }) => {
+    if (gameOver || !engineRef.current) return;
+    
+    const { x, y } = getScaledCoordinates(e.clientX, e.clientY);
 
     const bodies = Matter.Composite.allBodies(engineRef.current.world);
     const clicked = Matter.Query.point(bodies, { x, y })[0];
@@ -456,16 +471,12 @@ function Game({ difficulty, onBack }: { difficulty: Difficulty; onBack: () => vo
     }
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
+  const handleMouseMove = (e: React.MouseEvent | { clientX: number, clientY: number }) => {
     const currentSelected = selectedBallRef.current;
     if (!currentSelected || !engineRef.current) return;
 
-    const rect = sceneRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-    const mousePos = { x: mouseX, y: mouseY };
+    const { x, y } = getScaledCoordinates(e.clientX, e.clientY);
+    const mousePos = { x, y };
 
     const bodies = Matter.Composite.allBodies(engineRef.current.world);
     let bestTarget: Matter.Body | null = null;
@@ -589,14 +600,19 @@ function Game({ difficulty, onBack }: { difficulty: Difficulty; onBack: () => vo
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
             onTouchStart={(e) => {
+              if (e.cancelable) e.preventDefault();
               const touch = e.touches[0];
-              handleMouseDown({ clientX: touch.clientX, clientY: touch.clientY } as any);
+              handleMouseDown({ clientX: touch.clientX, clientY: touch.clientY });
             }}
             onTouchMove={(e) => {
+              if (e.cancelable) e.preventDefault();
               const touch = e.touches[0];
-              handleMouseMove({ clientX: touch.clientX, clientY: touch.clientY } as any);
+              handleMouseMove({ clientX: touch.clientX, clientY: touch.clientY });
             }}
-            onTouchEnd={handleMouseUp}
+            onTouchEnd={(e) => {
+              if (e.cancelable) e.preventDefault();
+              handleMouseUp();
+            }}
             className="absolute inset-0 cursor-crosshair touch-none"
           >
             <style>{`
