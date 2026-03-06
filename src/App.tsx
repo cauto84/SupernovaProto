@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Matter from 'matter-js';
-import { RefreshCcw, Trophy, Users, ChevronLeft, Send } from 'lucide-react';
+import { RefreshCcw, Trophy, Users, ChevronLeft, Send, Bomb, Wind } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 const COLORS = {
@@ -193,6 +193,7 @@ function Game({ onBack }: { onBack: () => void }) {
   const [gameOver, setGameOver] = useState(false);
   const gameOverRef = useRef(false);
   const [gameOverCountdown, setGameOverCountdown] = useState<number | null>(null);
+  const [shake, setShake] = useState(0);
   const [selectedBall, setSelectedBall] = useState<Matter.Body | null>(null);
   const [targetBall, setTargetBall] = useState<Matter.Body | null>(null);
   const selectedBallRef = useRef<Matter.Body | null>(null);
@@ -201,6 +202,93 @@ function Game({ onBack }: { onBack: () => void }) {
   const gameOverTimerRef = useRef<number | null>(null);
   const particlesRef = useRef<any[]>([]);
   const audioCtxRef = useRef<AudioContext | null>(null);
+
+  const [bombs, setBombs] = useState(2);
+  const [shakes, setShakes] = useState(2);
+
+  const playExplosionSound = () => {
+    try {
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') ctx.resume();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(100, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.5);
+    } catch (e) {}
+  };
+
+  const playShakeSound = () => {
+    try {
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') ctx.resume();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(50, ctx.currentTime);
+      osc.frequency.linearRampToValueAtTime(150, ctx.currentTime + 0.1);
+      osc.frequency.linearRampToValueAtTime(50, ctx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.2);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.2);
+    } catch (e) {}
+  };
+
+  const handleBomb = () => {
+    if (bombs <= 0 || gameOver) return;
+    const engine = engineRef.current;
+    if (!engine) return;
+
+    const bodies = Matter.Composite.allBodies(engine.world).filter(b => (b as any).tier && (b as any).tier <= 2);
+    if (bodies.length === 0) return;
+
+    setBombs(prev => prev - 1);
+    const toRemoveCount = Math.ceil(bodies.length / 2);
+    const shuffled = [...bodies].sort(() => Math.random() - 0.5);
+    const toRemove = shuffled.slice(0, toRemoveCount);
+
+    toRemove.forEach(b => {
+      createParticles(b.position.x, b.position.y, (b as any).customColor, 10, 1.5);
+      Matter.World.remove(engine.world, b);
+    });
+
+    playExplosionSound();
+    triggerHaptic(5);
+  };
+
+  const handleShake = () => {
+    if (shakes <= 0 || gameOver) return;
+    const engine = engineRef.current;
+    if (!engine) return;
+
+    setShakes(prev => prev - 1);
+    const bodies = Matter.Composite.allBodies(engine.world).filter(b => !(b as any).isStatic);
+    bodies.forEach(body => {
+      const forceMagnitude = 0.05 * body.mass;
+      Matter.Body.applyForce(body, body.position, {
+        x: (Math.random() - 0.5) * forceMagnitude,
+        y: (Math.random() - 0.5) * forceMagnitude - 0.03 * body.mass
+      });
+    });
+
+    playShakeSound();
+    triggerHaptic(4);
+  };
 
   const playMergeSound = (tier: number) => {
     try {
@@ -232,9 +320,56 @@ function Game({ onBack }: { onBack: () => void }) {
   };
 
   const triggerHaptic = (tier: number) => {
+    // Standard vibration API (Android/Chrome)
     if ('vibrate' in navigator) {
-      const duration = 15 + tier * 20;
-      navigator.vibrate(duration);
+      if (tier >= 5) {
+        // Supernova pattern: burst, burst, long
+        navigator.vibrate([40, 30, 40, 30, 80]);
+      } else {
+        const duration = 15 + tier * 20;
+        navigator.vibrate(duration);
+      }
+    }
+    
+    // Visual Haptic: Screen Shake
+    setShake(tier >= 5 ? 10 : 3 + tier);
+    setTimeout(() => setShake(0), 100);
+    
+    // iOS Fallback: Create a "thump" and "tick" using Web Audio API
+    try {
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') ctx.resume();
+      
+      // Low frequency "thump"
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      const freq = tier >= 5 ? 45 : 60 + tier * 10;
+      osc.frequency.setValueAtTime(freq, ctx.currentTime);
+      const volume = tier >= 5 ? 0.8 : 0.4;
+      gain.gain.setValueAtTime(volume, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + (tier >= 5 ? 0.3 : 0.1));
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + (tier >= 5 ? 0.3 : 0.1));
+
+      // High frequency "tick" for tactile feel
+      const tickOsc = ctx.createOscillator();
+      const tickGain = ctx.createGain();
+      tickOsc.type = 'square';
+      tickOsc.frequency.setValueAtTime(1500, ctx.currentTime);
+      tickGain.gain.setValueAtTime(0.05, ctx.currentTime);
+      tickGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.02);
+      tickOsc.connect(tickGain);
+      tickGain.connect(ctx.destination);
+      tickOsc.start();
+      tickOsc.stop(ctx.currentTime + 0.02);
+    } catch (e) {
+      // Silent fail
     }
   };
 
@@ -325,12 +460,12 @@ function Game({ onBack }: { onBack: () => void }) {
 
     // Dynamic ball drop logic
     const getSpawnConfig = (lvl: number) => {
-      const rawInterval = 2500 - (lvl - 1) * 200;
-      const interval = Math.max(400, rawInterval);
+      const rawInterval = 1800 - (lvl - 1) * 250;
+      const interval = Math.max(300, rawInterval);
       let count = 1;
-      if (rawInterval < 400) {
-        const overflow = 400 - rawInterval;
-        count = 1 + Math.floor(overflow / 200);
+      if (rawInterval < 300) {
+        const overflow = 300 - rawInterval;
+        count = 1 + Math.floor(overflow / 150);
       }
       return { interval, count };
     };
@@ -566,6 +701,14 @@ function Game({ onBack }: { onBack: () => void }) {
   const handleMouseDown = (e: React.MouseEvent | { clientX: number, clientY: number }) => {
     if (gameOver || !engineRef.current) return;
     
+    // Resume/Initialize audio on user interaction for iOS
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    if (audioCtxRef.current.state === 'suspended') {
+      audioCtxRef.current.resume();
+    }
+    
     const { x, y } = getScaledCoordinates(e.clientX, e.clientY);
 
     const bodies = Matter.Composite.allBodies(engineRef.current.world);
@@ -651,6 +794,11 @@ function Game({ onBack }: { onBack: () => void }) {
   };
 
   const handleMouseUp = () => {
+    // Resume audio on user interaction for iOS
+    if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
+      audioCtxRef.current.resume();
+    }
+
     const currentSelected = selectedBallRef.current;
     const currentTarget = targetBallRef.current;
     mergeTimerStartRef.current = null;
@@ -755,7 +903,13 @@ function Game({ onBack }: { onBack: () => void }) {
 
   return (
     <div className="fixed inset-0 bg-[#0f0f0f] flex flex-col items-center justify-center font-sans text-white overflow-hidden touch-none">
-      <div className="relative w-full h-full max-w-[450px] max-h-[800px] flex flex-col items-center justify-center p-2 sm:p-4">
+      <motion.div 
+        animate={{ 
+          x: shake ? (Math.random() - 0.5) * shake : 0,
+          y: shake ? (Math.random() - 0.5) * shake : 0 
+        }}
+        className="relative w-full h-full max-w-[450px] max-h-[800px] flex flex-col items-center justify-center p-2 sm:p-4"
+      >
         <div className="relative aspect-[2/3] w-full max-h-full border-4 border-[#333] rounded-2xl overflow-hidden shadow-2xl bg-[#1a1a1a]">
           {/* Level Progress Bar */}
           <div className="absolute top-0 left-0 w-full h-2 bg-white/5 z-20">
@@ -928,7 +1082,48 @@ function Game({ onBack }: { onBack: () => void }) {
           </div>
         )}
         </div>
-      </div>
+
+        {/* Power Ups */}
+        {!gameOver && (
+          <div className="mt-4 flex gap-4 justify-center w-full">
+            <button 
+              onClick={handleBomb}
+              disabled={bombs <= 0}
+              className={`flex flex-col items-center gap-1 p-3 rounded-2xl border transition-all ${
+                bombs > 0 
+                  ? 'bg-red-500/20 border-red-500/40 text-red-400 hover:bg-red-500/30 active:scale-95' 
+                  : 'bg-white/5 border-white/10 text-gray-600 opacity-50 cursor-not-allowed'
+              }`}
+            >
+              <div className="relative">
+                <Bomb className="w-6 h-6" />
+                <span className="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full">
+                  {bombs}
+                </span>
+              </div>
+              <span className="text-[10px] font-black uppercase tracking-widest">Bomb</span>
+            </button>
+
+            <button 
+              onClick={handleShake}
+              disabled={shakes <= 0}
+              className={`flex flex-col items-center gap-1 p-3 rounded-2xl border transition-all ${
+                shakes > 0 
+                  ? 'bg-blue-500/20 border-blue-500/40 text-blue-400 hover:bg-blue-500/30 active:scale-95' 
+                  : 'bg-white/5 border-white/10 text-gray-600 opacity-50 cursor-not-allowed'
+              }`}
+            >
+              <div className="relative">
+                <Wind className="w-6 h-6" />
+                <span className="absolute -top-2 -right-2 bg-blue-500 text-white text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full">
+                  {shakes}
+                </span>
+              </div>
+              <span className="text-[10px] font-black uppercase tracking-widest">Shake</span>
+            </button>
+          </div>
+        )}
+      </motion.div>
     </div>
   );
 }
