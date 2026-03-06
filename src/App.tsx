@@ -19,26 +19,17 @@ const TIER_CONFIG = [
 const CONNECTION_RADIUS = 150;
 const LIMIT_LINE_Y = 120; // 20% from top (80% from bottom of 600px height)
 const GAME_OVER_TIME = 5000; // 5 seconds
-const BALL_DROP_INTERVAL = 3000; // 3 seconds
 const MERGE_COUNTDOWN_DURATION = 1500; // 1.5 seconds
 
-type Difficulty = 'EASY' | 'MEDIUM' | 'HARD';
-
-const DIFFICULTY_CONFIG = {
-  EASY: { start: 5000, min: 2000, label: 'Easy', color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20' },
-  MEDIUM: { start: 4000, min: 1000, label: 'Medium', color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/20' },
-  HARD: { start: 3000, min: 500, label: 'Hard', color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/20' },
-};
-
 export default function App() {
-  const [difficulty, setDifficulty] = useState<Difficulty | null>(null);
+  const [gameStarted, setGameStarted] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
 
   if (showLeaderboard) {
     return <Leaderboard onBack={() => setShowLeaderboard(false)} />;
   }
 
-  if (!difficulty) {
+  if (!gameStarted) {
     return (
       <div className="fixed inset-0 bg-[#0f0f0f] flex flex-col items-center justify-center font-sans text-white overflow-hidden touch-none p-4">
         <motion.div 
@@ -52,8 +43,13 @@ export default function App() {
               transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
               className="inline-block mb-4"
             >
-              <div className="w-24 h-24 rounded-full bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center shadow-[0_0_50px_rgba(99,102,241,0.5)]">
-                <RefreshCcw className="w-12 h-12 text-white animate-spin-slow" />
+              <div className="w-24 h-24 rounded-3xl bg-[#1a1a1a] flex items-center justify-center shadow-[0_0_50px_rgba(0,0,0,0.5)] overflow-hidden relative border border-white/10">
+                {/* Custom Icon matching the user image */}
+                <div className="absolute -top-4 -left-4 w-16 h-16 rounded-full bg-[#FF595E]" />
+                <div className="absolute top-2 -right-6 w-20 h-20 rounded-full bg-[#8AC926]" />
+                <div className="absolute -bottom-8 -left-8 w-24 h-24 rounded-full bg-[#1982C4]" />
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/4 -translate-y-1/4 w-12 h-12 rounded-full bg-[#FFCA3A]" />
+                <div className="absolute -bottom-4 right-2 w-10 h-10 rounded-full bg-[#FF595E]" />
               </div>
             </motion.div>
             <h1 className="text-5xl font-black tracking-tighter uppercase mb-2 bg-clip-text text-transparent bg-gradient-to-b from-white to-gray-500">
@@ -63,28 +59,22 @@ export default function App() {
           </div>
 
           <div className="space-y-4">
-            {(Object.keys(DIFFICULTY_CONFIG) as Difficulty[]).map((key) => {
-              const config = DIFFICULTY_CONFIG[key];
-              return (
-                <motion.button
-                  key={key}
-                  whileHover={{ scale: 1.02, x: 5 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => setDifficulty(key)}
-                  className={`w-full p-6 rounded-2xl border ${config.bg} ${config.border} flex items-center justify-between group transition-all hover:border-white/20`}
-                >
-                  <div className="text-left">
-                    <h3 className={`text-xl font-black uppercase tracking-tight ${config.color}`}>{config.label}</h3>
-                    <p className="text-xs text-gray-500 mt-1">
-                      {config.start / 1000}s → {config.min / 1000}s spawn rate
-                    </p>
-                  </div>
-                  <div className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center group-hover:bg-white/10 transition-colors">
-                    <div className={`w-2 h-2 rounded-full ${config.color.replace('text', 'bg')} animate-pulse`} />
-                  </div>
-                </motion.button>
-              );
-            })}
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => setGameStarted(true)}
+              className="w-full p-6 rounded-2xl border border-white/10 bg-white/5 flex items-center justify-between group transition-all hover:border-white/20"
+            >
+              <div className="text-left">
+                <h3 className="text-xl font-black uppercase tracking-tight text-white">Start Game</h3>
+                <p className="text-xs text-gray-500 mt-1">
+                  Level up to increase your multiplier
+                </p>
+              </div>
+              <div className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center group-hover:bg-white/10 transition-colors">
+                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              </div>
+            </motion.button>
           </div>
 
           <div className="mt-8 flex flex-col items-center gap-4">
@@ -97,16 +87,13 @@ export default function App() {
               <Users className="w-4 h-4" />
               Leaderboard
             </motion.button>
-            <div className="text-gray-600 text-[10px] uppercase tracking-[0.2em]">
-              Select difficulty to begin
-            </div>
           </div>
         </motion.div>
       </div>
     );
   }
 
-  return <Game difficulty={difficulty} onBack={() => setDifficulty(null)} />;
+  return <Game onBack={() => setGameStarted(false)} />;
 }
 
 function Leaderboard({ onBack }: { onBack: () => void }) {
@@ -165,8 +152,8 @@ function Leaderboard({ onBack }: { onBack: () => void }) {
                   </span>
                   <div>
                     <p className="font-bold tracking-tight">{s.name}</p>
-                    <p className={`text-[10px] uppercase font-bold tracking-widest ${DIFFICULTY_CONFIG[s.difficulty as Difficulty]?.color || 'text-gray-500'}`}>
-                      {s.difficulty}
+                    <p className="text-[10px] uppercase font-bold tracking-widest text-gray-500">
+                      Level {s.level || 1}
                     </p>
                   </div>
                 </div>
@@ -180,12 +167,29 @@ function Leaderboard({ onBack }: { onBack: () => void }) {
   );
 }
 
-function Game({ difficulty, onBack }: { difficulty: Difficulty; onBack: () => void }) {
+function Game({ onBack }: { onBack: () => void }) {
   const sceneRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<Matter.Engine | null>(null);
   const renderRef = useRef<Matter.Render | null>(null);
   const [score, setScore] = useState(0);
   const scoreRef = useRef(0);
+  const [level, setLevel] = useState(1);
+  const levelRef = useRef(1);
+  const [levelProgress, setLevelProgress] = useState(0);
+  const [levelLimit, setLevelLimit] = useState(100);
+  const [multiplier, setMultiplier] = useState(1);
+  const multiplierRef = useRef(1);
+  const multiplierTimeoutRef = useRef<number | null>(null);
+  const [multiplierTimeLeft, setMultiplierTimeLeft] = useState(0);
+
+  // Keep refs in sync with state for Matter.js and timeouts
+  useEffect(() => {
+    levelRef.current = level;
+  }, [level]);
+
+  useEffect(() => {
+    multiplierRef.current = multiplier;
+  }, [multiplier]);
   const [gameOver, setGameOver] = useState(false);
   const gameOverRef = useRef(false);
   const [gameOverCountdown, setGameOverCountdown] = useState<number | null>(null);
@@ -234,7 +238,7 @@ function Game({ difficulty, onBack }: { difficulty: Difficulty; onBack: () => vo
     }
   };
 
-  const createParticles = (x: number, y: number, color: string, count = 15, speedMult = 1) => {
+  const createParticles = (x: number, y: number, color: string, count = 15, speedMult = 1, toScore = false) => {
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = (Math.random() * 4 + 2) * speedMult;
@@ -244,9 +248,13 @@ function Game({ difficulty, onBack }: { difficulty: Difficulty; onBack: () => vo
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
         life: 1.0,
-        decay: 0.02 + Math.random() * 0.02,
+        decay: toScore ? 0.005 : (0.02 + Math.random() * 0.02),
         color,
-        size: Math.random() * 5 + 2
+        size: Math.random() * 5 + 2,
+        toScore,
+        delay: toScore ? Math.random() * 20 : 0,
+        targetX: 350, // Approximate score position
+        targetY: 30
       });
     }
   };
@@ -265,8 +273,8 @@ function Game({ difficulty, onBack }: { difficulty: Difficulty; onBack: () => vo
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: playerName.trim(),
-          difficulty,
-          score: scoreRef.current
+          score: scoreRef.current,
+          level: levelRef.current
         })
       });
       if (response.ok) {
@@ -316,19 +324,26 @@ function Game({ difficulty, onBack }: { difficulty: Difficulty; onBack: () => vo
     Matter.Render.run(render);
 
     // Dynamic ball drop logic
-    const config = DIFFICULTY_CONFIG[difficulty];
-    const getDropInterval = (currentScore: number) => {
-      const reduction = Math.floor(currentScore / 100) * 100; // 100ms reduction per 100 points
-      return Math.max(config.min, config.start - reduction);
+    const getSpawnConfig = (lvl: number) => {
+      const rawInterval = 2500 - (lvl - 1) * 200;
+      const interval = Math.max(400, rawInterval);
+      let count = 1;
+      if (rawInterval < 400) {
+        const overflow = 400 - rawInterval;
+        count = 1 + Math.floor(overflow / 200);
+      }
+      return { interval, count };
     };
 
     let dropTimeout: number;
     const scheduleNextDrop = () => {
-      const interval = getDropInterval(scoreRef.current);
+      const { interval, count } = getSpawnConfig(levelRef.current);
       dropTimeout = window.setTimeout(() => {
         if (!gameOverRef.current) {
-          const newBall = createBall(Math.random() * 360 + 20, -20, 1);
-          Matter.World.add(engine.world, newBall);
+          for (let i = 0; i < count; i++) {
+            const newBall = createBall(Math.random() * 360 + 20, -20 - (i * 40), 1);
+            Matter.World.add(engine.world, newBall);
+          }
           scheduleNextDrop();
         }
       }, interval);
@@ -362,9 +377,29 @@ function Game({ difficulty, onBack }: { difficulty: Difficulty; onBack: () => vo
       // Update and draw particles
       particlesRef.current = particlesRef.current.filter(p => p.life > 0);
       particlesRef.current.forEach(p => {
+        if (p.delay > 0) {
+          p.delay--;
+          return;
+        }
+
+        if (p.toScore && p.life < 0.9) {
+          // Move towards score after initial burst
+          const dx = (p.targetX + (Math.random() * 20 - 10)) - p.x;
+          const dy = (p.targetY + (Math.random() * 20 - 10)) - p.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 15) {
+            p.life = 0;
+          } else {
+            const flySpeed = 15;
+            p.vx = (dx / dist) * flySpeed;
+            p.vy = (dy / dist) * flySpeed;
+          }
+        } else {
+          p.vy += 0.1; // gravity for burst phase
+        }
+
         p.x += p.vx;
         p.y += p.vy;
-        p.vy += 0.1; // gravity
         p.life -= p.decay;
         
         context.globalAlpha = p.life;
@@ -490,8 +525,9 @@ function Game({ difficulty, onBack }: { difficulty: Difficulty; onBack: () => vo
       Matter.Engine.clear(engine);
       if (render.canvas) render.canvas.remove();
       if (gameOverTimerRef.current) clearTimeout(gameOverTimerRef.current);
+      if (multiplierTimeoutRef.current) clearTimeout(multiplierTimeoutRef.current);
     };
-  }, [difficulty]);
+  }, []);
 
   const createBall = (x: number, y: number, tier: number, color?: string) => {
     const config = TIER_CONFIG[tier - 1];
@@ -592,9 +628,23 @@ function Game({ difficulty, onBack }: { difficulty: Difficulty; onBack: () => vo
     }
   };
 
+  const addLevelProgress = (amount: number) => {
+    setLevelProgress(prev => prev + amount);
+  };
+
+  useEffect(() => {
+    if (levelProgress >= levelLimit) {
+      const nextLevel = level + 1;
+      setLevel(nextLevel);
+      setLevelProgress(prev => prev - levelLimit);
+      setLevelLimit(prev => prev + 50);
+    }
+  }, [levelProgress, levelLimit, level]);
+
   const updateScore = (points: number) => {
+    const multipliedPoints = Math.round(points * level * multiplier);
     setScore(prev => {
-      const newScore = prev + points;
+      const newScore = prev + multipliedPoints;
       scoreRef.current = newScore;
       return newScore;
     });
@@ -627,15 +677,20 @@ function Game({ difficulty, onBack }: { difficulty: Difficulty; onBack: () => vo
             Matter.World.remove(engineRef.current.world, [currentSelected, currentTarget]);
             playMergeSound(tier);
             triggerHaptic(tier);
-            createParticles(targetPos.x, targetPos.y, color, 10);
+            
+            // Quantity scales with tier
+            const particleCount = 5 + tier * 10;
+            createParticles(targetPos.x, targetPos.y, color, particleCount, 1, true);
 
             if (tier < 3) {
               const nextTierBall = createBall(targetPos.x, targetPos.y, tier + 1, color);
               Matter.World.add(engineRef.current.world, nextTierBall);
               updateScore(TIER_CONFIG[tier - 1].points);
+              addLevelProgress(tier === 1 ? 2 : 5);
             } else {
               updateScore(500);
               triggerSupernova(targetPos.x, targetPos.y);
+              addLevelProgress(10);
             }
           }
         }
@@ -653,6 +708,34 @@ function Game({ difficulty, onBack }: { difficulty: Difficulty; onBack: () => vo
   const triggerSupernova = (x: number, y: number) => {
     if (!engineRef.current) return;
     
+    // Multiplier logic: increase and reset 5s timer
+    if (multiplierTimeoutRef.current) {
+      clearTimeout(multiplierTimeoutRef.current);
+    }
+    
+    const nextMult = multiplierRef.current + 1;
+    setMultiplier(nextMult);
+    setMultiplierTimeLeft(5000);
+
+    const startTime = Date.now();
+    const updateTimer = () => {
+      if (multiplierRef.current > 1) {
+        const elapsed = Date.now() - startTime;
+        const remaining = Math.max(0, 5000 - elapsed);
+        setMultiplierTimeLeft(remaining);
+        if (remaining > 0 && multiplierTimeoutRef.current) {
+          requestAnimationFrame(updateTimer);
+        }
+      }
+    };
+    requestAnimationFrame(updateTimer);
+
+    multiplierTimeoutRef.current = window.setTimeout(() => {
+      setMultiplier(1);
+      setMultiplierTimeLeft(0);
+      multiplierTimeoutRef.current = null;
+    }, 5000);
+
     // Big explosion effect
     createParticles(x, y, '#fff', 40, 2);
     createParticles(x, y, '#FFD700', 30, 1.5);
@@ -674,6 +757,16 @@ function Game({ difficulty, onBack }: { difficulty: Difficulty; onBack: () => vo
     <div className="fixed inset-0 bg-[#0f0f0f] flex flex-col items-center justify-center font-sans text-white overflow-hidden touch-none">
       <div className="relative w-full h-full max-w-[450px] max-h-[800px] flex flex-col items-center justify-center p-2 sm:p-4">
         <div className="relative aspect-[2/3] w-full max-h-full border-4 border-[#333] rounded-2xl overflow-hidden shadow-2xl bg-[#1a1a1a]">
+          {/* Level Progress Bar */}
+          <div className="absolute top-0 left-0 w-full h-2 bg-white/5 z-20">
+            <motion.div 
+              className="h-full bg-gradient-to-r from-emerald-500 to-blue-500"
+              initial={{ width: 0 }}
+              animate={{ width: `${(levelProgress / levelLimit) * 100}%` }}
+              transition={{ type: "spring", stiffness: 100, damping: 20 }}
+            />
+          </div>
+
           <div 
             ref={sceneRef} 
             onMouseDown={handleMouseDown}
@@ -712,14 +805,47 @@ function Game({ difficulty, onBack }: { difficulty: Difficulty; onBack: () => vo
           >
             <RefreshCcw className="w-4 h-4 rotate-180" />
           </button>
-          <div className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border ${DIFFICULTY_CONFIG[difficulty].bg} ${DIFFICULTY_CONFIG[difficulty].border} ${DIFFICULTY_CONFIG[difficulty].color}`}>
-            {DIFFICULTY_CONFIG[difficulty].label}
+          <div className="px-3 py-1 bg-white/5 backdrop-blur-md rounded-full border border-white/10 text-[10px] font-black uppercase tracking-widest text-white">
+            LVL {level}
           </div>
         </div>
 
-        <div className="absolute top-4 right-4 z-10 flex items-center gap-2 bg-black/40 backdrop-blur-md px-4 py-2 rounded-full border border-white/10">
-          <Trophy className="w-5 h-5 text-yellow-400" />
-          <span className="text-xl font-bold tracking-tight">{score}</span>
+        <div className="absolute top-4 right-4 z-10 flex flex-col items-end gap-1">
+          <AnimatePresence mode="wait">
+            {multiplier > 1 && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.5, y: 10 }}
+                animate={{ 
+                  opacity: 1, 
+                  scale: Math.min(1.5, 1 + (multiplier * 0.05)), 
+                  y: 0,
+                  rotate: [0, -Math.min(5, multiplier), Math.min(5, multiplier), -Math.min(5, multiplier), 0]
+                }}
+                exit={{ opacity: 0, scale: 0.5 }}
+                transition={{ 
+                  rotate: { repeat: Infinity, duration: 0.2 },
+                  scale: { type: "spring", stiffness: 300 }
+                }}
+                className="bg-red-500 text-white px-3 py-1 rounded-lg font-black italic shadow-lg flex flex-col items-center relative overflow-hidden"
+              >
+                <div className="text-xs uppercase tracking-tighter leading-none relative z-10">Supernova</div>
+                <div className="text-2xl leading-none relative z-10">x{multiplier}</div>
+                {/* Timer bar */}
+                <div className="absolute bottom-0 left-0 h-1 bg-white/40 z-10" style={{ width: `${(multiplierTimeLeft / 5000) * 100}%` }} />
+              </motion.div>
+            )}
+          </AnimatePresence>
+          
+          <motion.div 
+            key={score}
+            initial={{ scale: 1 }}
+            animate={{ scale: [1, 1.2, 1] }}
+            transition={{ duration: 0.2 }}
+            className="flex items-center gap-2 bg-black/40 backdrop-blur-md px-4 py-2 rounded-full border border-white/10"
+          >
+            <Trophy className="w-5 h-5 text-yellow-400" />
+            <span className="text-xl font-bold tracking-tight tabular-nums">{score}</span>
+          </motion.div>
         </div>
 
         <AnimatePresence>
